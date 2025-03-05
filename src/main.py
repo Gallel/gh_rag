@@ -1,14 +1,17 @@
 import os
 import requests
-from rag import RAG
+import pickle
 import docx
+import faiss
+from rag import RAG
 from dotenv import load_dotenv
 
 load_dotenv()
 
-RAG_FILE = "rag_data.pkl"
+MODEL_DIR = "../model/"
 API_URL = "https://api.openai.com/v1/chat/completions"
 API_KEY = os.getenv("OPENAI_API_KEY")
+
 
 def get_chatgpt_response(rol, prompt):
     headers = {
@@ -30,6 +33,7 @@ def get_chatgpt_response(rol, prompt):
     else:
         return f"Error: {response.status_code}, {response.text}"
 
+
 def save_responses_to_word(responses):
     fileName = "../output/respostes_chatgpt.docx"
     
@@ -39,24 +43,35 @@ def save_responses_to_word(responses):
     doc = docx.Document()
     doc.add_heading("Respostes de ChatGPT", level=1)
     
-    for i, response in enumerate(responses, 1):
-        doc.add_heading(f"Pregunta {i}", level=2)
+    for i, (rag_file, response) in enumerate(responses, 1):
+        doc.add_heading(f"Pregunta {i} (RAG: {rag_file})", level=2)
         doc.add_paragraph(response)
     
     doc.save(fileName)
     print(f"Respostes desades a {fileName}")
 
+
 def main():
-    if os.path.exists(RAG_FILE):
-        rag_system = RAG.load(RAG_FILE)
-    else:
-        print("RAG file not found!")
+    rag_files = [f for f in os.listdir(MODEL_DIR) if f.endswith(".pkl")]
+    if not rag_files:
+        print("No RAG files found!")
         return
     
     responses = []
     
-    for i in range(10):
-        tema = input(f"Introdueix el tema per a la pregunta {i+1}: ")
+    for rag_file in rag_files:
+        rag_path = os.path.join(MODEL_DIR, rag_file)
+        print(f"Carregant RAG: {rag_file}")
+        
+        with open(rag_path, "rb") as file:
+            sentences, embeddings = pickle.load(file)
+        
+        rag_system = RAG()
+        rag_system.sentences = sentences
+        rag_system.index = faiss.IndexFlatL2(embeddings.shape[1])
+        rag_system.index.add(embeddings)
+        
+        tema = input(f"Introdueix el tema per buscar al RAG ({rag_file}): ")
         relevant_sentence = rag_system.retrieve(tema)
         
         rol = "Ets un generador d'enunciats d'una assignatura de programació. Només has de generar el text de l'enunciat sense explicacions prèvies ni posteriors. L'enunciat ha de ser clar i concís i no es poden demanar coses que no estiguin explicades en el prompt que se't proporciona. Et donaré diversos exemples per tal que et basis en ells per generar la pregunta. Els exemples contenen la resposta, però només has de generar la pregunta."
@@ -71,9 +86,10 @@ def main():
         
         print(meta_prompt)
         chatgpt_response = get_chatgpt_response(rol, meta_prompt)
-        responses.append(chatgpt_response)
+        responses.append((rag_file, chatgpt_response))
     
     save_responses_to_word(responses)
+
 
 if __name__ == "__main__":
     main()
