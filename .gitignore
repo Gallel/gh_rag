@@ -1,0 +1,5 @@
+/input/
+/output/
+.env
+/src/__pycache__/
+*.pkl
